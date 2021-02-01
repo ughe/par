@@ -4,3 +4,12 @@
 
 
 Reserve colors for stderr or Exit-code non-zero vs Exit code 0?
+
+
+Useful cousin:
+
+```
+function fork {
+    nohup sh -c "$1 | mail -s \"`hostname`,`date`,$1\" wughetta@princeton.edu" &
+}
+```
