@@ -1,91 +1,75 @@
 #!/usr/bin/env bash
-#set +euf -o pipefail
-#trap "kill 0" SIGINT
+###---------------------------------------------------------------------
+### par
+### Parallelize commands. Displays up to 6 colors. Max 4000 char lines
+### William Ughetta. February 2022. MIT License
+###---------------------------------------------------------------------
+set +euf -o pipefail
 
-# Exit when first sub-process exits
-FAILFAST=true
+if [ $# -lt 1 ]; then >&2 echo example: $0 \'ping\ {google,apple}.com\'; exit 1; fi
 
-# Print colored line (6 colors: red, green, yellow, purple, pink, cyan). Default: 39
+TAG='par'
+
+# Print colored line (6 colors: red, green, yellow, purple, pink, cyan). Default color: 39
 # https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_(Select_Graphic_Rendition)_parameters
-function println {
+function print_color {
   printf '\033[1;%sm%s\033[0m\n' $(( $1 ? 31+$1%6 : 39 )) "$2"
 }
 
 # Line up the output names
-MAXLEN=0
 ABSMAX=71
-for i; do if [ ${#i} -gt $MAXLEN ]; then MAXLEN=${#i}; fi; done
+MAXLEN=0; for i; do if [ ${#i} -gt $MAXLEN ]; then MAXLEN=${#i}; fi; done
 if [ $MAXLEN -gt $ABSMAX ]; then MAXLEN=$ABSMAX; fi
-function println3 { println $1 "$(printf "%-$(($MAXLEN+1))s| %s" "$2" "$3")" ; }
+function println { print_color $1 "$(printf "%-$(($MAXLEN+1))s| %s" "$2" "$3")" ; }
 
-# Pad: Thanks to http://catern.org/pipes.html
-PIPEBUF=4096 #`getconf PIPE_BUF /` # Note: may break lines > 4096 characters
+# Pad: Adapted from http://catern.org/pipes.html
+PIPEBUF=4096 #`getconf PIPE_BUF /` # Reduces interleaving
 pad() { 2>/dev/null dd conv=block cbs=$PIPEBUF obs=$PIPEBUF ; }
 unpad() { 2>/dev/null dd conv=unblock cbs=$PIPEBUF ibs=$PIPEBUF ; }
 
-# Run each process
-#C=0; for i; do declare TMP_$((C++))=$(mktemp); done
-#C=0; for i; do t="TMP_$((C++))"; ${i} &> ${!t} & PIDS+=" $!"; done
-#C=0; for i; do t="TMP_$((C++))"; cat ${!t}; rm ${!t}; done
-#C=0; for i; do t="TMP_$((C++))"; ( ${i} | while read -r line; do printf "%-$(($MAXLEN+1))s| ${line}" "${i}"; done ) & PIDS+=" $!"; done
-# Wait for each to finish
-#PIDS="" ; C=0 ; for i; do t="TMP_$((C++))" ; (exec ${i} 2>&1 | while read line; do println $C "$(printf "%-$(($MAXLEN+1))s| %s" "$i" "$line")" ; done) & PIDS+=" $!"; done
-
-UNIFIED=`mktemp -u -t PIPE_UNIFIED`
-mkfifo $UNIFIED
-PIDS=""
-C=0
+# Exit when first sub-process exits
+UNIFIED=`mktemp -u -t PIPE_UNIFIED`; mkfifo $UNIFIED
+PIDS=""; C=0
 for i; do
-  C=$(( $C + 1 ))
-  t=`mktemp -u -t PIPE_TMP_$C`
-  mkfifo $t
-  ${i} &> $t &
-  PIDS+=" $!"
-  cat $t | while read line; do println3 $C "$i" "$line" ; done | pad >> $UNIFIED &
+  C=$(( $C + 1 )); t=`mktemp -u -t PIPE_TMP_$C`; mkfifo $t
+  eval "${i} &> $t &"
+  PIDS+="$! "
+  cat $t | while read line; do println $C "$i" "$line" ; done | pad >> $UNIFIED &
 done
+println 0 "$TAG" "Started $C procs. Waiting for any nonzero exit. PIDs: $PIDS"
 
-println3 0 "[PARALLEL]" "Started $C procs: $PIDS"
-println3 0 "[PARALLEL]" "Waiting for first proc to exit with nonzero status code..."
+# Output stream. Prevents lines (< 4096 chars) from interleaving
+UNIFIED_OPEN=true
+while $UNIFIED_OPEN; do cat $UNIFIED | unpad ; sleep 1; done &
+# TODO: Improvement detect no output for TIMEOUT (i.e. 5 minutes) and halt
 
-# Output combined stream
-cat $UNIFIED | unpad &
-UNIFIED_PID="$!"
-
-# Check every second for a process that terminated
-# A bit messy... but has nice output
-EXITCODE="0"
-N_EXIT_ZERO="0"
+# Check every second if all processes exited zero or if any one exited nonzero
+EXITCODE=0
+N_EXIT_ZERO=0
 PIDS_EXIT_ZERO=""
-while $FAILFAST; do
+while [ $EXITCODE -eq 0 ] && [ $N_EXIT_ZERO -lt $C ]; do
   j=0
-  for PID1 in $PIDS; do j=$(($j+1)); if ! &>/dev/null ps -p $PID1 && ! [[ $PIDS_EXIT_ZERO == *" $PID1 "* ]]; then
-    wait $PID1
-    EXITCODE=$?
-    if [ $N_EXIT_ZERO -lt $(( $C - 1 )) ]; then
-      println3 $j "[PARALLEL]" "PID $PID1 terminated with exit code: $EXITCODE. Command: '$(eval echo -n $`echo $j`)'" | pad >> $UNIFIED # Edge case: this doesn't work in last iteration
-    else
-      println3 $j "[PARALLEL]" "PID $PID1 terminated with exit code: $EXITCODE. Command: '$(eval echo -n $`echo $j`)'"
+  for PID1 in $PIDS; do j=$(($j+1))
+    if ! ps -p $PID1 &>/dev/null && ! [[ $PIDS_EXIT_ZERO == *" $PID1 "* ]]; then
+      wait $PID1; EXITCODE=$?
+      EXTRA=""; if [ $EXITCODE -ne 0 ]; then EXTRA=" Killing remaining processes..."; fi
+      println $j "$TAG" "PID $PID1 terminated with exit code: $EXITCODE. Command: '$(eval echo $`echo $j`)'$EXTRA" | pad >> $UNIFIED
+      if [ $EXITCODE -eq 0 ]; then N_EXIT_ZERO=$(( $N_EXIT_ZERO + 1 )); PIDS_EXIT_ZERO+=" $PID1 "; continue; fi
+      for PID2 in $PIDS; do &>/dev/null kill -9 $PID2; done; break # All done!
     fi
-    if [ $EXITCODE -eq 0 ]; then
-      N_EXIT_ZERO=$(( $N_EXIT_ZERO + 1 ))
-      PIDS_EXIT_ZERO+=" $PID1 "
-      continue
-    fi
-    println3 0 "[PARALLEL]" "Failure PID $PID1. Killing remaining processes" | pad >> $UNIFIED
-    for PID2 in $PIDS; do &>/dev/null kill -9 $PID2; done ; FAILFAST=false; break
-  fi; done
-  if [ $N_EXIT_ZERO -eq $C ]; then
-    println3 0 "[PARALLEL]" "Success. All processes exited zero"
-    break
-  fi
+  done
   sleep 1
 done
 
-# Ensure all $PIDS are finished
-for PID in $PIDS; do wait $PID; EC=$? ; if [ $EXITCODE -eq 0 ]; then EXITCODE=$EC; fi; done
+for PID in $PIDS; do EC=$EXITCODE; wait $PID && EC=$? ; if [ $EXITCODE -eq 0 ]; then EXITCODE=$EC; fi; done
 
-# Flush the output
-rm $UNIFIED
-wait $UNIFIED_PID
-println3 0 "[PARALLEL]" "Done. Exit code: $EXITCODE"
+# Close $UNIFIED output
+UNIFIED_OPEN=false
+
+if [ $N_EXIT_ZERO -eq $C ]; then
+  println 0 "$TAG" "Done. Success. All procs exited zero"
+else
+  println 0 "$TAG" "Done. Exit code: $EXITCODE"
+fi
+
 exit $EXITCODE
