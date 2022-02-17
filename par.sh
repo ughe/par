@@ -38,20 +38,21 @@ for i; do
 done
 println 0 "$TAG" "Started $C procs. Waiting for any nonzero exit. PIDs: $PIDS"
 
+
 # Output stream. Prevents lines (< 4096 chars) from interleaving
-UNIFIED_OPEN=true
-while $UNIFIED_OPEN; do cat $UNIFIED | unpad ; sleep 1; done &
 # TODO: Improvement detect no output for TIMEOUT (i.e. 5 minutes) and halt
 
-# Check every second if all processes exited zero or if any one exited nonzero
 EXITCODE=0
 N_EXIT_ZERO=0
 PIDS_EXIT_ZERO=""
+# Continuously echo to stdout
+while [ $EXITCODE -eq 0 ] && [ $N_EXIT_ZERO -lt $C ]; do cat $UNIFIED | unpad; done &
+# Check every second if all processes exited zero or if any one exited nonzero
 while [ $EXITCODE -eq 0 ] && [ $N_EXIT_ZERO -lt $C ]; do
   j=0
   for PID1 in $PIDS; do j=$(($j+1))
     if ! ps -p $PID1 &>/dev/null && ! [[ $PIDS_EXIT_ZERO == *" $PID1 "* ]]; then
-      wait $PID1; EXITCODE=$?
+      &>/dev/null wait $PID1; EXITCODE=$?
       EXTRA=""; if [ $EXITCODE -ne 0 ]; then EXTRA=" Killing remaining processes..."; fi
       println $j "$TAG" "PID $PID1 terminated with exit code: $EXITCODE. Command: '$(eval echo $`echo $j`)'$EXTRA" | pad >> $UNIFIED
       if [ $EXITCODE -eq 0 ]; then N_EXIT_ZERO=$(( $N_EXIT_ZERO + 1 )); PIDS_EXIT_ZERO+=" $PID1 "; continue; fi
@@ -61,15 +62,7 @@ while [ $EXITCODE -eq 0 ] && [ $N_EXIT_ZERO -lt $C ]; do
   sleep 1
 done
 
-for PID in $PIDS; do EC=$EXITCODE; wait $PID && EC=$? ; if [ $EXITCODE -eq 0 ]; then EXITCODE=$EC; fi; done
+for PID in $PIDS; do EC=$EXITCODE; &>/dev/null wait $PID; EC=$? ; if [ $EXITCODE -eq 0 ]; then EXITCODE=$EC; fi; done
 
-# Close $UNIFIED output
-UNIFIED_OPEN=false
-
-if [ $N_EXIT_ZERO -eq $C ]; then
-  println 0 "$TAG" "Done. Success. All procs exited zero"
-else
-  println 0 "$TAG" "Done. Exit code: $EXITCODE"
-fi
-
+println 0 "$TAG" "Done. Exit code: $EXITCODE"
 exit $EXITCODE
