@@ -14,12 +14,13 @@ The combined output is inspired by Docker compose's color-coding. The interleavi
 
 ## Tests
 
-Unit tests must be executed from inside the `tests` directory since they expect it to be the current working directory. For example:
+Unit tests must be executed from inside the `tests` directory since they expect it to be the current working directory. For example run `make test` or:
 
 ```
-cd tests
-./test_nc.sh
+cd tests && ./test_crash.sh
 ```
+
+The tests are demonstrations and have no assertions. Tests pass when they terminate and fail if they don't. All tests should print "Done" on the last line. Additionally, running `ps -ef | grep par` should yield no instances of the tests afterwards.
 
 ## Examples
 

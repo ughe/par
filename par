@@ -55,6 +55,7 @@ EXITCODE=0
 N_EXIT_ZERO=0
 PIDS_EXIT_ZERO=""
 # Check every second if all processes exited zero or if any one exited nonzero
+set +e
 while [ $EXITCODE -eq 0 ] && [ $N_EXIT_ZERO -lt $C ]; do
   j=0
   for PID1 in $PIDS; do j=$(($j+1))
@@ -70,6 +71,7 @@ while [ $EXITCODE -eq 0 ] && [ $N_EXIT_ZERO -lt $C ]; do
   done
   sleep 1
 done
+set -e
 
 for PID in $PIDS; do &>/dev/null wait $PID || true; done
 for PID in "`pgrep -P $PRINTER_PID` $PRINTER_PID"; do &>/dev/null kill -9 $PID || true; &>/dev/null wait $PID || true; done # Printer and children
