@@ -24,32 +24,24 @@ The tests are demonstrations and have no assertions. Tests pass when they termin
 
 ## Examples
 
-There are several ways to run commands in parallel. Here's how one could use `par`:
+There are several ways to run commands in parallel. Three approaches are shown using `par`, `xargs`, and email. Here's an example with `par`:
 
 ```
 par 'ping google.com' 'ping apple.com'
 ```
 
-Note: `par` expects a command for each argument and does not support arbitrary bash.
-
-Alternatively, one could use `xargs`:
+Another approach, is to use `xargs` (good for very quick tasks in parallel but interleaves output):
 
 ```
-echo '"ping google.com" "ping apple.com"' | xargs -n1 -P4 -I {} sh -c "echo '{}'; {}"
+echo '"ping google.com | head -n5" "ping apple.com | head -n5"' | xargs -n1 -P4 -I {} sh -c "echo '{}'; {}"
 ```
 
-An advantage of `xargs` is that there's nothing to install or set up. A drawback is that output characters have the potential to interleave. We can also add a timeout:
-
-```
-echo '"ping google.com & EC=$! ; sleep 5; kill -9 $EC ; exit 1 " "ping apple.com & EC=$! ; sleep 5; kill -9 $EC ; exit 1 "' | xargs -n1 -P4 -I {} sh -c "echo '{}'; {}"
-```
-
-Another approach besides `par` or `xargs` is to just invoke each process manually and email the results. For example:
+A third alternative, is to start each process manually and email the results when finished (good for very long tasks i.e. days and doesn't interleave output):
 
 ```
 function fork {
     nohup sh -c "$1 | mail -s \"`hostname`,`date`,$1\" email@example.com" &
 }
-fork 'ping google.com & EC=$! ; sleep 5; kill -9 $EC ; exit 1'
-fork 'ping apple.com & EC=$! ; sleep 5; kill -9 $EC ; exit 1'
+fork 'ping google.com | head -n5'
+fork 'ping apple.com | head -n5'
 ```

@@ -9,7 +9,6 @@ set -euf -o pipefail
 if [ $# -lt 1 ]; then >&2 echo example: $0 \'ping\ {google,apple}.com\'; exit 1; fi
 
 TAG='par'
-TIMEOUT_MINUTES=0 # Max run time (0 == DISABLED)
 
 # Print colored line (6 colors: red, green, yellow, purple, pink, cyan)
 # https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_(Select_Graphic_Rendition)_parameters
@@ -34,10 +33,11 @@ UNIFIED=`mktemp -u -t PIPE_UNIFIED`; mkfifo $UNIFIED
 PIDS=""; C=0
 for i; do
   C=$(( $C + 1 )); t=`mktemp -u -t PIPE_TMP_$C`; mkfifo $t
-  ${i} &> $t &
+  eval "${i} &> $t &" # Warning: eval here may hang or print since it's not backgrounded or redirected to $t
   PIDS+="$! "
-  cat $t | while read line; do println $C "$i" "$line" ; done | pad >> $UNIFIED &
+  IFS=''; while read line; do println $C "$i" "$line" ; done <$t | pad >> $UNIFIED &
 done
+unset IFS
 println 0 "$TAG" "Started $C procs. Warning: lines truncated around $PIPEBUF chars. Waiting for any nonzero exit. PIDs: $PIDS"
 
 # Continuously echo to stdout
@@ -47,7 +47,7 @@ PRINTER_PID="$!"
 # Stop the background printer when ctrl-c is pressed
 function stop_stragglers {
   for PID in "`pgrep -P $PRINTER_PID` $PRINTER_PID"; do &>/dev/null kill -9 $PID || true; &>/dev/null wait $PID || true; done # printer
-  echo 'SIGINT. Exit code: 2'; exit 2
+  printf '\033[0mSIGINT. Exit code: 2\n'; exit 2
 }
 trap stop_stragglers SIGINT
 

@@ -3,7 +3,7 @@
 cat >"nc_listen.sh" <<EOF
 #!/usr/bin/env sh
 if [ \$# -ne 1 ]; then >&2 echo "usage: \$0 1234"; exit 1; fi
-echo "Starting netcat on :\$1 (killing any other netcats on the same port)..."
+echo "Starting netcat on :\$1 ..."
 lsof -i :\$1 | awk '/nc /{print \$2}' | xargs kill -9
 nc -l \$1
 EOF
